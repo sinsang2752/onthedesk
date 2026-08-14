@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>OnTheDesk Input</title>
+</head>
+<body>
+  <!--
+    화면에 보이지 않는(1x1, 화면 밖) 입력 전용 창.
+    조작 모드일 때만 이 창이 실제 OS 키보드 포커스를 가져서 방향키를 받는다.
+    캐릭터가 그려지는 오버레이 창은 이 창과 분리되어 있어 포커스가 절대 바뀌지 않는다
+    (그래서 조작↔관전 전환 시 캐릭터가 깜빡이지 않음).
+  -->
+  <script src="input.js"></script>
+</body>
+</html>

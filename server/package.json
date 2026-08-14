@@ -1,0 +1,13 @@
+{
+  "name": "onthedesk-signaling-server",
+  "version": "0.1.0",
+  "description": "OnTheDesk 데스크톱 펫 멀티플레이어용 WebRTC 시그널링 서버 (SDP/ICE 중계 전용, 위치/채팅 데이터는 다루지 않음)",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "ws": "^8.21.0"
+  }
+}

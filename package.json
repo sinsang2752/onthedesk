@@ -1,0 +1,13 @@
+{
+  "name": "onthedesk",
+  "version": "0.1.0",
+  "description": "Desktop Pet - Multiplayer & Chat (Phase 1: single-player base)",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^43.0.0"
+  }
+}
