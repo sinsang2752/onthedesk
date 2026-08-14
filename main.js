@@ -1,14 +1,122 @@
 const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, globalShortcut } = require('electron')
 const path = require('path')
+const fs = require('fs')
 
+let launcherWindow = null
 let overlayWindow = null
 let inputWindow = null
+let chatWindow = null
 let tray = null
 let isVisible = true
 let mode = 'spectate' // 'spectate' | 'control' — 3.6 조작 모드
+let chatOpen = false // 조작 모드 중 채팅 입력창이 떠 있는지
+let sessionStarted = false // 런처를 지나 실제 캐릭터 세션이 시작됐는지
+// inputWindow.hide()를 우리가 직접 호출해서 생기는 blur인지, 사용자가 실제로 다른 앱으로
+// 전환해서 생긴(예기치 않은) blur인지 구분하기 위한 플래그 (아래 hideInputWindow 참고)
+let intentionalInputBlur = false
 
-function createOverlayWindow() {
-  const { x, y, width, height } = screen.getPrimaryDisplay().bounds
+// ---- 설정 파일 / 로컬 상태 저장 ----
+
+function loadClientConfig() {
+  const configDir = path.join(__dirname, 'config')
+  const realPath = path.join(configDir, 'client-config.json')
+  const examplePath = path.join(configDir, 'client-config.example.json')
+  const filePath = fs.existsSync(realPath) ? realPath : examplePath
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+  } catch {
+    return { signalingServerUrl: 'ws://localhost:8080' }
+  }
+}
+
+const stateFilePath = path.join(app.getPath('userData'), 'onthedesk-state.json')
+
+function loadLocalState() {
+  try {
+    return JSON.parse(fs.readFileSync(stateFilePath, 'utf-8'))
+  } catch {
+    return {}
+  }
+}
+
+function saveLocalState(partial) {
+  const next = { ...loadLocalState(), ...partial }
+  try {
+    fs.mkdirSync(path.dirname(stateFilePath), { recursive: true })
+    fs.writeFileSync(stateFilePath, JSON.stringify(next))
+  } catch {
+    // 닉네임 저장 실패는 치명적이지 않으니 조용히 무시
+  }
+}
+
+function createLauncherWindow() {
+  launcherWindow = new BrowserWindow({
+    width: 420,
+    height: 620,
+    resizable: false,
+    title: 'OnTheDesk',
+    webPreferences: {
+      preload: path.join(__dirname, 'launcher-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+  launcherWindow.setMenuBarVisibility(false)
+  launcherWindow.loadFile(path.join(__dirname, 'launcher', 'index.html'))
+
+  launcherWindow.on('closed', () => {
+    launcherWindow = null
+    // 런처(로그인성 화면)를 그냥 닫으면 시작할 게 없으니 앱 자체를 종료.
+    // 이미 세션이 시작된 뒤라면(오버레이가 떠 있음) 트레이 상주 앱이므로 종료하지 않음.
+    if (!sessionStarted) {
+      app.quit()
+    }
+  })
+}
+
+// 여러 모니터 중 오버레이를 띄울 대상을 정한다. 저장된/전달된 displayId가 없거나
+// 지금은 연결되어 있지 않은 모니터라면(예: 외장 모니터를 뺀 채로 실행) 주 모니터로 대체.
+function resolveTargetDisplay(displayId) {
+  if (displayId == null) return screen.getPrimaryDisplay()
+  const numericId = Number(displayId)
+  const displays = screen.getAllDisplays()
+  return displays.find((d) => d.id === numericId) || screen.getPrimaryDisplay()
+}
+
+// 런처에서 "방 만들기/참여하기/오프라인" 선택이 끝나면 실제 캐릭터 세션을 시작한다.
+function startSession(params) {
+  if (sessionStarted) return
+  sessionStarted = true
+
+  if (params.nickname) {
+    saveLocalState({ nickname: params.nickname })
+  }
+  if (params.species) {
+    saveLocalState({ species: params.species })
+  }
+  if (params.displayId != null) {
+    saveLocalState({ displayId: Number(params.displayId) })
+  }
+
+  const targetDisplay = resolveTargetDisplay(params.displayId)
+
+  createOverlayWindow(targetDisplay)
+  createInputWindow()
+  createChatWindow(targetDisplay)
+
+  const initParams = { ...params, signalingServerUrl: loadClientConfig().signalingServerUrl }
+  overlayWindow.webContents.once('did-finish-load', () => {
+    overlayWindow.webContents.send('init-params', initParams)
+  })
+  overlayWindow.showInactive()
+
+  if (launcherWindow) {
+    launcherWindow.close()
+  }
+}
+
+function createOverlayWindow(targetDisplay) {
+  const { x, y, width, height } = (targetDisplay || screen.getPrimaryDisplay()).bounds
 
   overlayWindow = new BrowserWindow({
     x,
@@ -78,9 +186,81 @@ function createInputWindow() {
 
   inputWindow.loadFile(path.join(__dirname, 'renderer', 'input.html'))
 
+  // 이 창이 포커스를 잃는 경우는 두 가지: (1) 우리가 직접 hide()해서(채팅창을 열거나
+  // 관전 모드로 돌아갈 때) (2) 사용자가 실제로 다른 앱으로 전환해서(예기치 않은 경우).
+  // (1)은 이미 의도한 전환이니 또 setMode를 부를 필요가 없고, (2)일 때만 조작 모드를
+  // 종료해서 눌림 상태(keysDown)가 꼬이는 것을 방지해야 한다.
+  inputWindow.on('blur', () => {
+    if (intentionalInputBlur) {
+      intentionalInputBlur = false
+      return
+    }
+    setMode('spectate')
+  })
+
   inputWindow.on('closed', () => {
     inputWindow = null
   })
+}
+
+// 우리가 의도적으로 inputWindow를 숨길 때는 항상 이 함수를 거쳐서,
+// 뒤이어 발생하는 blur 이벤트가 오작동하지 않게 한다.
+function hideInputWindow() {
+  intentionalInputBlur = true
+  inputWindow?.hide()
+}
+
+function createChatWindow(targetDisplay) {
+  // 조작 모드 중 Enter를 누르면 화면 하단에 뜨는 채팅 입력창(3.6).
+  // 실제 텍스트 입력(한글 조합 포함)에는 진짜 OS 포커스가 필요한데, 오버레이 창은
+  // focusable:false라서 포커스를 받을 수 없음 — 그래서 이것도 별도의 작은 창으로 분리.
+  // 오버레이와 같은 모니터에 떠야 하므로 그 모니터의 bounds(x/y 오프셋 포함)를 그대로 씀.
+  const { x: dx, y: dy, width, height } = (targetDisplay || screen.getPrimaryDisplay()).bounds
+  const winWidth = 480
+  const winHeight = 56
+
+  chatWindow = new BrowserWindow({
+    x: dx + Math.round((width - winWidth) / 2),
+    y: dy + height - winHeight - 40,
+    width: winWidth,
+    height: winHeight,
+    show: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false,
+    resizable: false,
+    movable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'chat-input-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  })
+
+  chatWindow.loadFile(path.join(__dirname, 'renderer', 'chat-input.html'))
+  chatWindow.on('show', () => chatWindow.webContents.send('focus-input'))
+  chatWindow.on('closed', () => {
+    chatWindow = null
+  })
+}
+
+function openChatInput() {
+  if (mode !== 'control' || chatOpen) return
+  chatOpen = true
+  hideInputWindow() // 방향키 입력 창은 잠깐 포커스를 반환
+  chatWindow?.show() // show()가 곧 포커스도 가져감
+}
+
+function closeChatInput() {
+  if (!chatOpen) return
+  chatOpen = false
+  chatWindow?.hide()
+  if (mode === 'control') {
+    inputWindow?.show() // 채팅이 끝나면 다시 방향키 입력으로 포커스 반환
+  }
 }
 
 function createTray() {
@@ -116,6 +296,26 @@ function updateTrayMenu() {
   tray.setContextMenu(menu)
 }
 
+// ---- 런처 IPC ----
+ipcMain.handle('get-client-config', () => loadClientConfig())
+ipcMain.handle('get-saved-nickname', () => loadLocalState().nickname || '')
+ipcMain.on('save-nickname', (_event, nickname) => saveLocalState({ nickname }))
+ipcMain.handle('get-saved-species', () => loadLocalState().species || 'cat')
+ipcMain.on('save-species', (_event, species) => saveLocalState({ species }))
+ipcMain.handle('get-displays', () => {
+  const primaryId = screen.getPrimaryDisplay().id
+  return screen.getAllDisplays().map((d, index) => ({
+    id: d.id,
+    index,
+    isPrimary: d.id === primaryId,
+    width: d.bounds.width,
+    height: d.bounds.height,
+  }))
+})
+ipcMain.handle('get-saved-display-id', () => loadLocalState().displayId ?? null)
+ipcMain.on('save-display-id', (_event, displayId) => saveLocalState({ displayId: Number(displayId) }))
+ipcMain.on('launcher-start', (_event, params) => startSession(params))
+
 // 렌더러가 캐릭터 위에서 마우스를 올리거나(hover) 벗어날 때
 // 클릭 통과 여부를 토글하기 위해 보내는 요청
 ipcMain.on('set-ignore-mouse-events', (event, ignore, options) => {
@@ -136,6 +336,14 @@ ipcMain.on('control-keyup', (_event, code) => {
   overlayWindow?.webContents.send('remote-keyup', code)
 })
 
+// 채팅 입력창 흐름 (3.3, 3.6)
+ipcMain.on('open-chat-input', () => openChatInput())
+ipcMain.on('chat-send', (_event, text) => {
+  closeChatInput()
+  overlayWindow?.webContents.send('chat-message-sent', text)
+})
+ipcMain.on('chat-cancel', () => closeChatInput())
+
 // 개발용 디버그 채널: 실제 OS 전역 단축키 없이도 자동화 테스트에서 모드를 바꿔볼 수 있게 함.
 // 패키징된 빌드(app.isPackaged === true)에서는 등록되지 않음.
 if (!app.isPackaged) {
@@ -145,6 +353,13 @@ if (!app.isPackaged) {
 function setMode(newMode) {
   if (mode === newMode) return
   mode = newMode
+
+  // 전역 단축키(Shift+1)로 강제로 관전 모드에 들어가는 경우 등, 채팅 입력 중이었다면 같이 정리
+  if (chatOpen) {
+    chatOpen = false
+    chatWindow?.hide()
+  }
+
   if (!overlayWindow) return
 
   overlayWindow.webContents.send('mode-changed', mode)
@@ -154,7 +369,7 @@ function setMode(newMode) {
   if (mode === 'control') {
     inputWindow?.show()
   } else {
-    inputWindow?.hide()
+    hideInputWindow()
   }
 }
 
@@ -168,12 +383,20 @@ function registerGlobalShortcuts() {
   }
 }
 
+// inputWindow의 blur만으로는 "우리 앱의 다른 창으로 포커스 이동"과 "완전히 다른 앱으로
+// 전환"을 구분하기 까다로운 경우가 있다(다중 모니터에서 다른 모니터의 다른 앱을 클릭하는
+// 경우 등). macOS에서는 "앱 자체가 활성 상태를 잃었다"는 더 확실한 신호가 따로 있어서,
+// 이걸로 한 번 더 안전하게 관전 모드로 되돌린다.
+function registerAppActivationGuard() {
+  if (process.platform !== 'darwin') return
+  app.on('did-resign-active', () => setMode('spectate'))
+}
+
 app.whenReady().then(() => {
-  createOverlayWindow()
-  createInputWindow()
   createTray()
   registerGlobalShortcuts()
-  overlayWindow.showInactive() // 포커스를 뺏지 않고 표시
+  registerAppActivationGuard()
+  createLauncherWindow() // 캐릭터 창은 런처에서 방 만들기/참여/오프라인을 고른 뒤에 생성됨(startSession)
 })
 
 app.on('will-quit', () => {

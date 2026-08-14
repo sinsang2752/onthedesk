@@ -6,13 +6,25 @@
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-  <div id="mode-indicator" class="mode-indicator">관전 모드</div>
-  <div id="pet" class="pet">
-    <div class="speech-bubble" id="speech-bubble"></div>
-    <div class="flip" id="flip">
-      <div class="bob" id="bob">🐈</div>
-    </div>
+  <div id="mode-indicator" class="mode-indicator">관전 모드 (조작 전환: Shift+`)</div>
+
+  <!-- 채팅 로그 패널 (3.3) — 우상단 토글 버튼으로 열고 닫음 -->
+  <div id="chat-toggle" class="chat-toggle">💬</div>
+  <div id="chat-panel" class="chat-panel">
+    <div id="chat-log" class="chat-log"></div>
   </div>
-  <script src="pet.js"></script>
+
+  <!-- 로컬 캐릭터 + 원격 참여자 캐릭터가 전부 여기 안에 동적으로 생성됨 (character.js) -->
+  <div id="characters-root"></div>
+
+  <template id="character-template">
+    <div class="pet">
+      <div class="speech-bubble"></div>
+      <div class="nickname"></div>
+      <img class="sprite" alt="" draggable="false" />
+    </div>
+  </template>
+
+  <script type="module" src="pet.js"></script>
 </body>
 </html>

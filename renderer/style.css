@@ -11,44 +11,34 @@ html, body {
 
 .pet {
   position: absolute;
-  width: 64px;
-  height: 64px;
+  /* 해상도에 비례해서 커지고 작아짐 (renderer/scale.js가 계산) */
+  width: var(--pet-size, 64px);
+  height: var(--pet-size, 64px);
   left: 0;
   top: 0;
   /* (x, y)를 캐릭터의 "발밑 중앙"으로 취급하기 위한 앵커 보정 */
   transform: translate(-50%, -100%);
+  /* 기본은 마우스 상호작용 불가 — 원격 참여자 캐릭터는 관전 전용(read-only, 3.6/3.7).
+     로컬 캐릭터만 .local 클래스로 pointer-events를 다시 켠다. */
+  pointer-events: none;
+}
+
+.pet.local {
   cursor: pointer;
   pointer-events: auto;
 }
 
-.flip {
+.sprite {
   width: 100%;
   height: 100%;
-  transition: transform 0.08s linear;
-}
-
-.pet.facing-left .flip {
-  transform: scaleX(-1);
-}
-
-.bob {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  font-size: 48px;
-  line-height: 1;
+  display: block;
+  /* 16x16 픽셀아트를 확대하는 거라 부드럽게 블러 처리되지 않고 또렷하게 보이게 함 */
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
   filter: drop-shadow(0 3px 2px rgba(0, 0, 0, 0.35));
-}
-
-.pet.walking .bob {
-  animation: bob 0.35s infinite ease-in-out;
-}
-
-@keyframes bob {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
+  pointer-events: none;
+  -webkit-user-drag: none;
 }
 
 .speech-bubble {
@@ -58,10 +48,10 @@ html, body {
   transform: translateX(-50%) translateY(-8px) scale(0.85);
   background: #ffffff;
   color: #222222;
-  padding: 8px 12px;
-  border-radius: 12px;
+  padding: var(--pet-bubble-padding-v, 8px) var(--pet-bubble-padding-h, 12px);
+  border-radius: var(--pet-bubble-radius, 12px);
   font-family: -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
-  font-size: 14px;
+  font-size: var(--pet-bubble-font-size, 14px);
   white-space: nowrap;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
   opacity: 0;
@@ -84,6 +74,22 @@ html, body {
   transform: translateX(-50%) translateY(-8px) scale(1);
 }
 
+.nickname {
+  position: absolute;
+  bottom: var(--pet-nickname-offset, -16px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: var(--pet-nickname-size, 11px);
+  font-weight: 700;
+  white-space: nowrap;
+  font-family: -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  text-shadow:
+    0 0 3px rgba(255, 255, 255, 0.9),
+    0 0 3px rgba(255, 255, 255, 0.9),
+    0 1px 2px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+
 .mode-indicator {
   position: fixed;
   top: 12px;
@@ -96,4 +102,67 @@ html, body {
   font-size: 12px;
   pointer-events: none;
   z-index: 9999;
+}
+
+/* 채팅 로그 패널 (3.3) — 기본은 다른 요소들처럼 클릭 통과 상태였다가,
+   hover 시에만 pet.js가 setIgnoreMouseEvents(false)를 걸어서 클릭/스크롤 가능해짐 */
+.chat-toggle {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  cursor: pointer;
+  z-index: 9999;
+}
+
+.chat-panel {
+  position: fixed;
+  top: 50px;
+  right: 12px;
+  width: 260px;
+  height: 300px;
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  display: none;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 9998;
+}
+
+.chat-panel.open {
+  display: flex;
+}
+
+.chat-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  font-family: -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+  color: #222;
+}
+
+.chat-log-row {
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
+.chat-log-name {
+  font-weight: 700;
+}
+
+.chat-log-row.system {
+  color: #888888;
+  font-style: italic;
+  text-align: center;
 }

@@ -10,11 +10,39 @@
 const http = require('http')
 const crypto = require('crypto')
 const { WebSocketServer } = require('ws')
-const { port, maxParticipants, roomInactivityTimeoutMs, heartbeatIntervalMs } = require('./config')
+const {
+  port,
+  maxParticipants,
+  heartbeatIntervalMs,
+  emptyRoomGraceMs,
+  joinRateLimitWindowMs,
+  joinRateLimitMax,
+} = require('./config')
 const { generateRoomCode } = require('./roomCode')
 
-// roomCode -> { participants: Map<participantId, { ws, nickname }>, lastActivityAt }
+// roomCode -> { participants: Map<participantId, { ws, nickname }>, lastActivityAt, emptiedAt }
 const rooms = new Map()
+
+// 참여 코드 무작위 대입 방지 (3.7): ip -> { count, windowStart }
+const joinAttemptsByIp = new Map()
+
+function isJoinRateLimited(ip) {
+  const now = Date.now()
+  const entry = joinAttemptsByIp.get(ip)
+  if (!entry || now - entry.windowStart > joinRateLimitWindowMs) {
+    joinAttemptsByIp.set(ip, { count: 1, windowStart: now })
+    return false
+  }
+  entry.count += 1
+  return entry.count > joinRateLimitMax
+}
+
+function clientIp(req) {
+  // Render 등 리버스 프록시 뒤에서는 실제 클라이언트 IP가 X-Forwarded-For에 담겨 온다.
+  const forwarded = req.headers['x-forwarded-for']
+  if (forwarded) return forwarded.split(',')[0].trim()
+  return req.socket.remoteAddress || 'unknown'
+}
 
 function send(ws, message) {
   if (ws.readyState === ws.OPEN) {
@@ -39,7 +67,7 @@ function createRoom() {
     roomCode = generateRoomCode()
   } while (rooms.has(roomCode))
 
-  const room = { participants: new Map(), lastActivityAt: Date.now() }
+  const room = { participants: new Map(), lastActivityAt: Date.now(), emptiedAt: null }
   rooms.set(roomCode, room)
   return roomCode
 }
@@ -47,6 +75,14 @@ function createRoom() {
 function sanitizeNickname(nickname) {
   const trimmed = String(nickname || '').trim().slice(0, 20)
   return trimmed || '익명'
+}
+
+// 캐릭터 종류(species)는 클라이언트가 어떤 스프라이트를 그릴지 정하는 값일 뿐이라 서버는
+// 내용을 해석하지 않지만, 알 수 없는/조작된 값이 다른 참여자에게 그대로 전달되지 않도록
+// 화이트리스트로 한 번 걸러서 중계한다.
+const ALLOWED_SPECIES = new Set(['cat', 'dog', 'frog', 'turtle'])
+function sanitizeSpecies(species) {
+  return ALLOWED_SPECIES.has(species) ? species : 'cat'
 }
 
 function removeParticipant(ws) {
@@ -60,8 +96,10 @@ function removeParticipant(ws) {
   room.participants.delete(meta.participantId)
 
   if (room.participants.size === 0) {
-    // 마지막 인원이 나가면 방 자동 삭제 (3.1)
-    rooms.delete(meta.roomCode)
+    // 마지막 인원이 나가면 방을 삭제하되(3.1), 곧바로 지우지는 않고 잠깐 유예를 준다.
+    // (예: 방을 만든 클라이언트가 확인 창을 닫고 실제 캐릭터 창으로 다시 접속하는 흐름처럼,
+    //  참여자가 0명인 순간이 아주 짧게 스쳐 지나가는 정상적인 경우가 있음)
+    room.emptiedAt = Date.now()
   } else {
     touchRoom(room)
     broadcast(room, { type: 'peer-left', participantId: meta.participantId }, null)
@@ -75,8 +113,9 @@ function handleMessage(ws, msg) {
       const room = rooms.get(roomCode)
       const participantId = crypto.randomUUID()
       const nickname = sanitizeNickname(msg.nickname)
+      const species = sanitizeSpecies(msg.species)
 
-      room.participants.set(participantId, { ws, nickname })
+      room.participants.set(participantId, { ws, nickname, species })
       ws.__meta = { roomCode, participantId }
 
       send(ws, { type: 'room-created', roomCode, participantId })
@@ -84,6 +123,11 @@ function handleMessage(ws, msg) {
     }
 
     case 'join-room': {
+      if (isJoinRateLimited(ws.__ip)) {
+        send(ws, { type: 'error', code: 'RATE_LIMITED' })
+        return
+      }
+
       const roomCode = String(msg.roomCode || '').trim().toUpperCase()
       const room = rooms.get(roomCode)
 
@@ -98,19 +142,22 @@ function handleMessage(ws, msg) {
 
       const participantId = crypto.randomUUID()
       const nickname = sanitizeNickname(msg.nickname)
+      const species = sanitizeSpecies(msg.species)
       // 새로 들어온 사람에게 "이미 방에 있던 사람들" 목록을 줘서, 그 각각과
       // WebRTC 연결을 새로 맺을 수 있게 함 (3.2 "접속 직후" 참고)
       const existingParticipants = [...room.participants.entries()].map(([id, p]) => ({
         id,
         nickname: p.nickname,
+        species: p.species,
       }))
 
-      room.participants.set(participantId, { ws, nickname })
+      room.participants.set(participantId, { ws, nickname, species })
       ws.__meta = { roomCode, participantId }
+      room.emptiedAt = null // 참여자가 생겼으니 유예 삭제 예약을 취소
       touchRoom(room)
 
       send(ws, { type: 'joined', roomCode, participantId, participants: existingParticipants })
-      broadcast(room, { type: 'peer-joined', participantId, nickname }, participantId)
+      broadcast(room, { type: 'peer-joined', participantId, nickname, species }, participantId)
       break
     }
 
@@ -156,7 +203,8 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ server })
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  ws.__ip = clientIp(req)
   ws.isAlive = true
   ws.on('pong', () => {
     ws.isAlive = true
@@ -190,19 +238,29 @@ const heartbeatTimer = setInterval(() => {
   }
 }, heartbeatIntervalMs)
 
-// 안전망: 참여자가 0명인데도 남아있는 방 정리 (정상 흐름에서는 발생하지 않아야 함 —
-// removeParticipant가 즉시 삭제하기 때문. 활성 참여자가 있는 방은 절대 건드리지 않음)
+// 참여자가 0명이 된 방을 유예시간(emptyRoomGraceMs)이 지난 뒤에 실제로 정리한다.
+// 활성 참여자가 있는 방(participants.size > 0)은 절대 건드리지 않음.
 const roomSweeperTimer = setInterval(
   () => {
     const now = Date.now()
     for (const [roomCode, room] of rooms) {
-      if (room.participants.size === 0 && now - room.lastActivityAt > roomInactivityTimeoutMs) {
+      if (room.participants.size === 0 && room.emptiedAt && now - room.emptiedAt > emptyRoomGraceMs) {
         rooms.delete(roomCode)
       }
     }
   },
-  Math.min(roomInactivityTimeoutMs, 5 * 60 * 1000)
+  Math.min(emptyRoomGraceMs, 5000)
 )
+
+// join 시도 기록도 안 쓰는 IP는 주기적으로 정리 (메모리 누수 방지)
+const joinAttemptsSweeperTimer = setInterval(() => {
+  const now = Date.now()
+  for (const [ip, entry] of joinAttemptsByIp) {
+    if (now - entry.windowStart > joinRateLimitWindowMs) {
+      joinAttemptsByIp.delete(ip)
+    }
+  }
+}, Math.max(joinRateLimitWindowMs, 30_000))
 
 server.listen(port, () => {
   console.log(`[onthedesk-signaling] listening on :${port}`)
@@ -211,6 +269,7 @@ server.listen(port, () => {
 function shutdown() {
   clearInterval(heartbeatTimer)
   clearInterval(roomSweeperTimer)
+  clearInterval(joinAttemptsSweeperTimer)
   wss.close(() => {
     server.close(() => process.exit(0))
   })

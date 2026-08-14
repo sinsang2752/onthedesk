@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>OnTheDesk Chat</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      overflow: hidden;
+    }
+    #bar {
+      display: flex;
+      align-items: center;
+      height: 100%;
+      box-sizing: border-box;
+      padding: 0 14px;
+      gap: 10px;
+      background: rgba(255, 255, 255, 0.96);
+      border-radius: 14px;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+      transform: translateY(16px);
+      opacity: 0;
+      transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+    /* 슬라이드 업 효과 — 창 자체는 그냥 나타나지만, 안의 막대가 아래에서 위로 올라오는 것처럼 보이게 */
+    #bar.visible {
+      transform: translateY(0);
+      opacity: 1;
+    }
+    input {
+      flex: 1;
+      border: none;
+      outline: none;
+      font-size: 15px;
+      font-family: -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+      background: transparent;
+      color: #222;
+    }
+    .hint {
+      font-size: 11px;
+      color: #999;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <div id="bar">
+    <input id="chat-text" type="text" maxlength="200" placeholder="메시지를 입력하세요..." />
+    <span class="hint">Enter 전송 · Esc 취소</span>
+  </div>
+  <script src="chat-input.js"></script>
+</body>
+</html>

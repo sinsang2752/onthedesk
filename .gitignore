@@ -2,3 +2,6 @@ node_modules/
 dist/
 .DS_Store
 *.log
+
+# 실제 시그널링 서버 주소(예: Render 배포 주소) — 예시 파일만 커밋하고 실제 값은 로컬에만
+config/client-config.json

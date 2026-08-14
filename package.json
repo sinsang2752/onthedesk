@@ -1,13 +1,51 @@
 {
   "name": "onthedesk",
   "version": "0.1.0",
-  "description": "Desktop Pet - Multiplayer & Chat (Phase 1: single-player base)",
+  "description": "OnTheDesk - 데스크톱 펫 멀티플레이어",
   "private": true,
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist": "electron-builder --mac --win"
   },
   "devDependencies": {
-    "electron": "^43.0.0"
+    "electron": "^43.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.onthedesk.app",
+    "productName": "OnTheDesk",
+    "files": [
+      "main.js",
+      "preload.js",
+      "input-preload.js",
+      "chat-input-preload.js",
+      "launcher-preload.js",
+      "launcher/**/*",
+      "renderer/**/*",
+      "config/**/*",
+      "assets/tray-icon.png",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.entertainment",
+      "target": ["dmg", "zip"]
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": ["nsis", "zip"],
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>OnTheDesk</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+      background: #f5f6f8;
+      color: #222;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    h1 {
+      font-size: 20px;
+      margin: 0 0 4px;
+    }
+    p.subtitle {
+      margin: 0 0 20px;
+      font-size: 13px;
+      color: #777;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      color: #555;
+      margin-bottom: 4px;
+    }
+    input {
+      width: 100%;
+      padding: 8px 10px;
+      font-size: 14px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      margin-bottom: 14px;
+    }
+    .section {
+      background: #fff;
+      border: 1px solid #e2e2e2;
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .section h2 {
+      font-size: 14px;
+      margin: 0 0 12px;
+    }
+    button {
+      width: 100%;
+      padding: 10px;
+      font-size: 14px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      background: #4a63e8;
+      color: #fff;
+      font-weight: 600;
+    }
+    button:hover { background: #3a51c9; }
+    button.secondary {
+      background: #eee;
+      color: #333;
+    }
+    button.secondary:hover { background: #ddd; }
+    button:disabled {
+      background: #ccc;
+      cursor: default;
+    }
+    .join-row {
+      display: flex;
+      gap: 8px;
+    }
+    .join-row input { margin-bottom: 0; }
+    .join-row button { width: auto; padding: 10px 16px; white-space: nowrap; }
+    #status {
+      min-height: 20px;
+      font-size: 13px;
+      margin-top: 8px;
+    }
+    #status.error { color: #d33; }
+    #status.info { color: #666; }
+    #status.success { color: #1a8a3d; }
+    #room-code-box {
+      display: none;
+      text-align: center;
+      margin-top: 10px;
+    }
+    #room-code-box .code {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: 4px;
+      margin: 8px 0;
+    }
+    .offline-link {
+      display: block;
+      text-align: center;
+      margin-top: 4px;
+      font-size: 12px;
+      color: #888;
+      background: none;
+      border: none;
+      text-decoration: underline;
+      cursor: pointer;
+      width: auto;
+      padding: 4px;
+    }
+    .species-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .species-row select {
+      flex: 1;
+      padding: 8px 10px;
+      font-size: 14px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      background: #fff;
+    }
+    #species-preview {
+      width: 40px;
+      height: 40px;
+      image-rendering: pixelated;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: crisp-edges;
+      background: #f0f0f0;
+      border-radius: 8px;
+      flex-shrink: 0;
+    }
+    #display-select {
+      width: 100%;
+      padding: 8px 10px;
+      font-size: 14px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      background: #fff;
+      margin-bottom: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🐈 OnTheDesk</h1>
+  
+  <label for="nickname">닉네임</label>
+  <input id="nickname" maxlength="20" placeholder="예: 홍길동" />
+
+  <label for="species">캐릭터 종류</label>
+  <div class="species-row">
+    <img id="species-preview" alt="" />
+    <select id="species">
+      <option value="cat">고양이</option>
+      <option value="dog">강아지</option>
+      <option value="frog">개구리</option>
+      <option value="turtle">거북이</option>
+    </select>
+  </div>
+
+  <label for="display-select" id="display-label" style="display: none;">표시할 모니터</label>
+  <select id="display-select" style="display: none;"></select>
+
+  <div class="section">
+    <h2>방 만들기</h2>
+    <button id="create-btn">새 방 만들기</button>
+    <div id="room-code-box">
+      <div>참여 코드를 알려주세요</div>
+      <div class="code" id="room-code-text">------</div>
+      <button id="proceed-btn">시작하기</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>참여하기</h2>
+    <div class="join-row">
+      <input id="room-code-input" maxlength="6" placeholder="참여 코드 6자리" style="text-transform: uppercase;" />
+      <button id="join-btn" class="secondary">참여</button>
+    </div>
+  </div>
+
+  <div id="status"></div>
+
+  <button id="offline-btn" class="offline-link">서버 없이 혼자 하기</button>
+
+  <script src="launcher.js"></script>
+</body>
+</html>

@@ -5,4 +5,5 @@ contextBridge.exposeInMainWorld('inputAPI', {
   keyDown: (code) => ipcRenderer.send('control-keydown', code),
   keyUp: (code) => ipcRenderer.send('control-keyup', code),
   exitControlMode: () => ipcRenderer.send('exit-control-mode'),
+  openChatInput: () => ipcRenderer.send('open-chat-input'),
 })

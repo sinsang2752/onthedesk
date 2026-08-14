@@ -23,4 +23,12 @@ contextBridge.exposeInMainWorld('petAPI', {
   onRemoteKeyUp: (callback) => {
     ipcRenderer.on('remote-keyup', (_event, code) => callback(code))
   },
+  // 런처에서 고른 시작 파라미터: { mode: 'offline'|'multiplayer', nickname, roomCode?, signalingServerUrl }
+  onInitParams: (callback) => {
+    ipcRenderer.on('init-params', (_event, params) => callback(params))
+  },
+  // 채팅 입력창(별도 창)에서 사용자가 실제로 보낸 메시지가 여기로 전달됨 (3.3)
+  onChatMessageSent: (callback) => {
+    ipcRenderer.on('chat-message-sent', (_event, text) => callback(text))
+  },
 })
