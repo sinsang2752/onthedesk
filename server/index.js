@@ -67,7 +67,11 @@ function createRoom() {
     roomCode = generateRoomCode()
   } while (rooms.has(roomCode))
 
-  const room = { participants: new Map(), lastActivityAt: Date.now(), emptiedAt: null }
+  // 방을 만든 순간엔 아직 아무도 실제로 들어와 있지 않다 — 런처는 코드만 받아서 보여주고
+  // 바로 연결을 끊기 때문(create-room 처리부 주석 참고). 그래서 "비어있는 채로 생성된
+  // 시각"을 바로 emptiedAt으로 잡아서, 유예시간(emptyRoomGraceMs)이 지나도록 정말 아무도
+  // (만든 사람 본인의 캐릭터 창조차) join하지 않았으면 그때 정리되게 한다.
+  const room = { participants: new Map(), lastActivityAt: Date.now(), emptiedAt: Date.now() }
   rooms.set(roomCode, room)
   return roomCode
 }
@@ -109,16 +113,12 @@ function removeParticipant(ws) {
 function handleMessage(ws, msg) {
   switch (msg.type) {
     case 'create-room': {
+      // 이 연결(런처의 임시 연결)은 코드를 보여준 직후 바로 끊길 것이므로 참여자로
+      // 등록하지 않는다 — 등록했다가 곧장 removeParticipant로 지우는 건 불필요한 처리이자,
+      // "생성 직후 잠깐 0명"이라는 상태를 실제보다 더 이르게(그리고 부정확하게) 만들 뿐이다.
+      // 진짜 참여자 등록은 이후 join-room(만든 사람의 캐릭터 창이든, 초대받은 사람이든)에서 이뤄진다.
       const roomCode = createRoom()
-      const room = rooms.get(roomCode)
-      const participantId = crypto.randomUUID()
-      const nickname = sanitizeNickname(msg.nickname)
-      const species = sanitizeSpecies(msg.species)
-
-      room.participants.set(participantId, { ws, nickname, species })
-      ws.__meta = { roomCode, participantId }
-
-      send(ws, { type: 'room-created', roomCode, participantId })
+      send(ws, { type: 'room-created', roomCode })
       break
     }
 
