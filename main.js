@@ -191,6 +191,15 @@ function createInputWindow() {
   // (1)은 이미 의도한 전환이니 또 setMode를 부를 필요가 없고, (2)일 때만 조작 모드를
   // 종료해서 눌림 상태(keysDown)가 꼬이는 것을 방지해야 한다.
   inputWindow.on('blur', () => {
+    // 채팅 입력창이 떠 있는 동안의 blur는 우리가 포커스를 넘겨준 결과다(정상).
+    // 이 판단을 "blur 한 번 무시"처럼 횟수로 하면 안 된다 — 윈도우에서는 hide()와
+    // chatWindow로의 포커스 이동에서 blur가 각각 한 번씩, 총 두 번 발생한다.
+    // 그러면 두 번째 blur가 일회성 플래그를 통과해서 방금 연 채팅창이 곧바로
+    // 관전 모드로 닫혀버린다.
+    if (chatOpen) {
+      intentionalInputBlur = false // 남은 플래그가 다음 blur를 잘못 삼키지 않게 정리
+      return
+    }
     if (intentionalInputBlur) {
       intentionalInputBlur = false
       return
@@ -256,11 +265,12 @@ function openChatInput() {
 
 function closeChatInput() {
   if (!chatOpen) return
-  chatOpen = false
   chatWindow?.hide()
   if (mode === 'control') {
     inputWindow?.show() // 채팅이 끝나면 다시 방향키 입력으로 포커스 반환
   }
+  // chatOpen은 창 전환이 끝난 뒤에 내린다 — 전환 중에 오는 blur까지 위 가드가 덮도록.
+  chatOpen = false
 }
 
 function createTray() {
@@ -351,6 +361,10 @@ if (!app.isPackaged) {
 }
 
 function setMode(newMode) {
+  // 세션(오버레이)이 시작되기 전에는 모드라는 개념이 없다. 여기서 mode만 먼저 바꿔버리면
+  // 런처 화면에서 Shift+`를 누른 것만으로 내부 상태가 'control'이 되어, 정작 세션이
+  // 시작된 뒤에는 같은 단축키가 "이미 control"이라 무시되고 입력 창도 안 뜬다.
+  if (!overlayWindow) return
   if (mode === newMode) return
   mode = newMode
 
@@ -359,8 +373,6 @@ function setMode(newMode) {
     chatOpen = false
     chatWindow?.hide()
   }
-
-  if (!overlayWindow) return
 
   overlayWindow.webContents.send('mode-changed', mode)
 
