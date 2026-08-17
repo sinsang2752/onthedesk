@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, globalShortcut } = require('electron')
+const { app, BrowserWindow, Tray, Menu, ipcMain, screen, nativeImage, globalShortcut, clipboard } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
@@ -15,6 +15,8 @@ let hudVisible = true
 let mode = 'spectate' // 'spectate' | 'control' — 3.6 조작 모드
 let chatOpen = false // 조작 모드 중 채팅 입력창이 떠 있는지
 let sessionStarted = false // 런처를 지나 실제 캐릭터 세션이 시작됐는지
+let sessionMode = null // 'offline' | 'multiplayer' — 트레이의 "방 나가기" 표시 여부에 사용
+let leavingRoom = false // 방 나가기 처리 중복 실행 방지
 // inputWindow.hide()를 우리가 직접 호출해서 생기는 blur인지, 사용자가 실제로 다른 앱으로
 // 전환해서 생긴(예기치 않은) blur인지 구분하기 위한 플래그 (아래 hideInputWindow 참고)
 let intentionalInputBlur = false
@@ -53,10 +55,23 @@ function saveLocalState(partial) {
   }
 }
 
+// 사용자가 고를 수 있는 표시 배율. "내 화면에서 캐릭터/말풍선이 얼마나 크게 보일지"만
+// 정하는 값이고, 네트워크로 주고받지 않는다 — 다른 참여자 화면에는 영향이 없다
+// (좌표·크기를 각자 자기 화면 기준으로 계산하는 기존 원칙과 동일. renderer/scale.js 참고).
+const VIEW_SCALES = [0.7, 0.85, 1, 1.3]
+const DEFAULT_VIEW_SCALE = 1
+
+function normalizeViewScale(value) {
+  const num = Number(value)
+  return VIEW_SCALES.includes(num) ? num : DEFAULT_VIEW_SCALE
+}
+
 function createLauncherWindow() {
   launcherWindow = new BrowserWindow({
     width: 420,
-    height: 620,
+    // 표시 배율 항목이 늘어나면서 기존 620px에서는 하단("서버 없이 혼자 하기")이 잘리고
+    // 스크롤바가 생겼다. 모니터가 2개 이상이면 모니터 선택까지 붙어서 가장 길어진다.
+    height: 730,
     resizable: false,
     title: 'OnTheDesk',
     webPreferences: {
@@ -91,6 +106,7 @@ function resolveTargetDisplay(displayId) {
 function startSession(params) {
   if (sessionStarted) return
   sessionStarted = true
+  sessionMode = params.mode
 
   if (params.nickname) {
     saveLocalState({ nickname: params.nickname })
@@ -101,10 +117,13 @@ function startSession(params) {
   if (params.displayId != null) {
     saveLocalState({ displayId: Number(params.displayId) })
   }
+  if (params.viewScale != null) {
+    saveLocalState({ viewScale: Number(params.viewScale) })
+  }
 
   const targetDisplay = resolveTargetDisplay(params.displayId)
 
-  createOverlayWindow(targetDisplay)
+  createOverlayWindow(targetDisplay, params.viewScale)
   createInputWindow()
   createChatWindow(targetDisplay)
 
@@ -118,12 +137,16 @@ function startSession(params) {
   })
   overlayWindow.showInactive()
 
+  // 트레이 메뉴는 sessionMode에 따라 "방 나가기" 항목이 붙고 빠지므로, 세션이 시작된
+  // 지금 다시 만들어줘야 한다 (안 하면 앱 시작 시점의 "세션 없음" 메뉴가 그대로 남는다).
+  updateTrayMenu()
+
   if (launcherWindow) {
     launcherWindow.close()
   }
 }
 
-function createOverlayWindow(targetDisplay) {
+function createOverlayWindow(targetDisplay, viewScale) {
   const { x, y, width, height } = (targetDisplay || screen.getPrimaryDisplay()).bounds
 
   overlayWindow = new BrowserWindow({
@@ -160,7 +183,12 @@ function createOverlayWindow(targetDisplay) {
   // mousemove는 렌더러까지 전달되어 캐릭터 위에서의 hover 감지가 가능함.
   overlayWindow.setIgnoreMouseEvents(true, { forward: true })
 
-  overlayWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'))
+  // 표시 배율은 init-params(IPC)가 아니라 URL 쿼리로 넘긴다 — scale.js가 모듈 로드
+  // 시점에 캐릭터 크기와 화면 경계 여백을 상수로 계산하기 때문에, 첫 렌더 전에
+  // 값이 이미 있어야 한다(나중에 IPC로 받으면 한 번 그린 뒤 크기가 튀게 된다).
+  overlayWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'), {
+    query: { viewScale: String(normalizeViewScale(viewScale)) },
+  })
 
   overlayWindow.on('closed', () => {
     overlayWindow = null
@@ -281,6 +309,55 @@ function closeChatInput() {
   chatOpen = false
 }
 
+// 트레이의 "방 나가기" — P2P/시그널링 연결을 렌더러가 먼저 정리하게 한 뒤(상대에게도
+// 퇴장이 바로 전달되도록), 세션 창들을 닫고 런처 화면으로 돌아간다.
+function leaveRoom() {
+  if (leavingRoom || !sessionStarted) return
+  leavingRoom = true
+
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    overlayWindow.webContents.send('leave-room')
+    // 렌더러가 정리 완료를 알려주면 즉시, 응답이 없으면 짧은 유예 후 강제로 진행
+    const timer = setTimeout(finishLeaveRoom, 700)
+    ipcMain.once('leave-room-ready', () => {
+      clearTimeout(timer)
+      finishLeaveRoom()
+    })
+  } else {
+    finishLeaveRoom()
+  }
+}
+
+function finishLeaveRoom() {
+  if (!leavingRoom) return
+  leavingRoom = false
+
+  for (const win of [overlayWindow, inputWindow, chatWindow]) {
+    if (win && !win.isDestroyed()) win.destroy()
+  }
+  overlayWindow = null
+  inputWindow = null
+  chatWindow = null
+
+  // 다음 세션이 깨끗한 상태에서 시작하도록 세션 관련 상태를 전부 초기화.
+  // sessionStarted=false라서 이제 런처를 닫으면 앱이 종료된다(최초 실행과 동일).
+  sessionStarted = false
+  sessionMode = null
+  mode = 'spectate'
+  chatOpen = false
+  intentionalInputBlur = false
+  isVisible = true // "캐릭터 숨기기" 상태였다면 트레이 라벨과 어긋나지 않게 되돌림
+
+  updateTrayMenu()
+
+  if (launcherWindow && !launcherWindow.isDestroyed()) {
+    launcherWindow.show()
+    launcherWindow.focus()
+  } else {
+    createLauncherWindow()
+  }
+}
+
 function createTray() {
   const iconPath = path.join(__dirname, 'assets', 'tray-icon.png')
   let icon = nativeImage.createFromPath(iconPath)
@@ -316,6 +393,16 @@ function updateTrayMenu() {
         updateTrayMenu()
       },
     },
+    // 방에 들어와 있을 때만 의미가 있는 항목이라 멀티플레이 세션에서만 보여준다.
+    ...(sessionMode === 'multiplayer'
+      ? [
+          { type: 'separator' },
+          {
+            label: '방 나가기',
+            click: () => leaveRoom(),
+          },
+        ]
+      : []),
     { type: 'separator' },
     {
       label: '종료',
@@ -343,7 +430,15 @@ ipcMain.handle('get-displays', () => {
 })
 ipcMain.handle('get-saved-display-id', () => loadLocalState().displayId ?? null)
 ipcMain.on('save-display-id', (_event, displayId) => saveLocalState({ displayId: Number(displayId) }))
+ipcMain.handle('get-saved-view-scale', () => normalizeViewScale(loadLocalState().viewScale))
+ipcMain.on('save-view-scale', (_event, viewScale) => saveLocalState({ viewScale: normalizeViewScale(viewScale) }))
 ipcMain.on('launcher-start', (_event, params) => startSession(params))
+
+// 참여 코드 복사 — 렌더러의 navigator.clipboard는 file:// 문서에서 막힐 수 있으므로
+// Electron의 clipboard 모듈을 메인 프로세스에서 직접 쓴다.
+ipcMain.on('copy-to-clipboard', (_event, text) => {
+  clipboard.writeText(String(text ?? ''))
+})
 
 // 렌더러가 캐릭터 위에서 마우스를 올리거나(hover) 벗어날 때
 // 클릭 통과 여부를 토글하기 위해 보내는 요청

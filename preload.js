@@ -35,4 +35,12 @@ contextBridge.exposeInMainWorld('petAPI', {
   onHudVisibilityChanged: (callback) => {
     ipcRenderer.on('hud-visibility', (_event, visible) => callback(visible))
   },
+  // 트레이 메뉴의 "방 나가기" — P2P/시그널링 연결을 정리하라는 요청.
+  // 정리가 끝나면 leaveRoomReady()로 알려주면 메인이 창을 닫고 런처로 돌아간다.
+  onLeaveRoom: (callback) => {
+    ipcRenderer.on('leave-room', () => callback())
+  },
+  leaveRoomReady: () => {
+    ipcRenderer.send('leave-room-ready')
+  },
 })

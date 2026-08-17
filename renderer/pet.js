@@ -394,6 +394,22 @@ function startMultiplayer({ signalingServerUrl, roomCode, nickname, species }) {
   window.__debugSendRaw = (msg) => network?.broadcast(msg)
 }
 
+// 트레이의 "방 나가기" — P2P/시그널링 연결을 끊고 원격 캐릭터를 화면에서 지운다.
+// 정리가 끝나면 메인 프로세스가 창을 닫고 런처로 돌아간다.
+window.petAPI.onLeaveRoom(() => {
+  try {
+    network?.disconnect()
+  } catch {
+    // 이미 끊긴 연결일 수 있음 — 어차피 창이 닫히므로 무시
+  }
+  network = null
+  for (const [peerId, entry] of remotePeers) {
+    entry.character.destroy()
+    remotePeers.delete(peerId)
+  }
+  window.petAPI.leaveRoomReady()
+})
+
 window.petAPI.onInitParams((params) => {
   applyHudVisibility(params.hudVisible !== false)
   if (params.mode === 'offline') {

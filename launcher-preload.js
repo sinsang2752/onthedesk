@@ -9,6 +9,9 @@ contextBridge.exposeInMainWorld('launcherAPI', {
   getDisplays: () => ipcRenderer.invoke('get-displays'),
   getSavedDisplayId: () => ipcRenderer.invoke('get-saved-display-id'),
   saveDisplayId: (displayId) => ipcRenderer.send('save-display-id', displayId),
-  // params = { mode: 'offline' | 'multiplayer', nickname, species, displayId?, roomCode? }
+  getSavedViewScale: () => ipcRenderer.invoke('get-saved-view-scale'),
+  saveViewScale: (viewScale) => ipcRenderer.send('save-view-scale', viewScale),
+  copyText: (text) => ipcRenderer.send('copy-to-clipboard', text),
+  // params = { mode: 'offline' | 'multiplayer', nickname, species, displayId?, roomCode?, viewScale? }
   start: (params) => ipcRenderer.send('launcher-start', params),
 })

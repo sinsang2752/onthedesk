@@ -12,11 +12,27 @@ const REFERENCE_WIDTH = 1920
 const MIN_PET_SIZE = 40 // 너무 작아져서 안 보이는 걸 방지
 const MAX_PET_SIZE = 160 // 초고해상도에서 과도하게 커지는 걸 방지
 
+const VIEW_SCALES = [0.7, 0.85, 1, 1.3] // main.js의 VIEW_SCALES와 같은 목록
+const DEFAULT_VIEW_SCALE = 1
+
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max)
 }
 
-export const PET_SIZE = Math.round(clamp(BASE_PET_SIZE * (window.innerWidth / REFERENCE_WIDTH), MIN_PET_SIZE, MAX_PET_SIZE))
+// 사용자가 런처에서 고른 "내 화면 표시 배율". 메인 프로세스가 창을 띄울 때 URL 쿼리로
+// 넘겨준다 — 아래 PET_SIZE가 모듈 로드 시점에 확정돼야 해서 IPC로는 늦다(main.js 참고).
+// 이 값은 네트워크로 주고받지 않으므로 다른 참여자 화면에는 영향이 없다.
+function readViewScale() {
+  const raw = Number(new URLSearchParams(window.location.search).get('viewScale'))
+  return VIEW_SCALES.includes(raw) ? raw : DEFAULT_VIEW_SCALE
+}
+
+// 해상도 기반 크기를 먼저 clamp한 뒤 사용자 배율을 곱한다 — 순서를 바꾸면 고해상도에서
+// MAX_PET_SIZE에 먼저 걸려서 "크게"를 골라도 더 커지지 않는다.
+const RESOLUTION_PET_SIZE = clamp(BASE_PET_SIZE * (window.innerWidth / REFERENCE_WIDTH), MIN_PET_SIZE, MAX_PET_SIZE)
+
+export const VIEW_SCALE = readViewScale()
+export const PET_SIZE = Math.round(RESOLUTION_PET_SIZE * VIEW_SCALE)
 export const SCALE_FACTOR = PET_SIZE / BASE_PET_SIZE
 
 const root = document.documentElement

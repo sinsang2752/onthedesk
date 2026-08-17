@@ -17,6 +17,8 @@ const roomCodeInput = document.getElementById('room-code-input')
 const joinBtn = document.getElementById('join-btn')
 const offlineBtn = document.getElementById('offline-btn')
 const statusEl = document.getElementById('status')
+const copyBtn = document.getElementById('copy-btn')
+const scaleSelect = document.getElementById('scale-select')
 
 let config = { signalingServerUrl: 'ws://localhost:8080' }
 let pendingRoomCode = null
@@ -83,6 +85,19 @@ function selectedDisplayId() {
   return displays.length > 1 ? Number(displaySelect.value) : undefined
 }
 
+function selectedViewScale() {
+  return Number(scaleSelect.value)
+}
+
+// 세 가지 시작 경로(방 만들기/참여/오프라인)가 공통으로 저장하는 값
+function saveCommonSettings(nickname) {
+  const displayId = selectedDisplayId()
+  window.launcherAPI.saveNickname(nickname)
+  window.launcherAPI.saveSpecies(speciesSelect.value)
+  window.launcherAPI.saveViewScale(selectedViewScale())
+  if (displayId !== undefined) window.launcherAPI.saveDisplayId(displayId)
+}
+
 async function init() {
   try {
     config = await window.launcherAPI.getConfig()
@@ -101,9 +116,25 @@ async function init() {
   } catch {
     // 무시
   }
+  try {
+    const savedScale = await window.launcherAPI.getSavedViewScale()
+    if (savedScale != null) scaleSelect.value = String(savedScale)
+  } catch {
+    // 무시 — 기본값(표준) 유지
+  }
   updateSpeciesPreview()
   await initDisplays()
 }
+
+copyBtn.addEventListener('click', () => {
+  if (!pendingRoomCode) return
+  window.launcherAPI.copyText(pendingRoomCode)
+  const original = copyBtn.textContent
+  copyBtn.textContent = '복사됨!'
+  setTimeout(() => {
+    copyBtn.textContent = original
+  }, 1200)
+})
 
 speciesSelect.addEventListener('change', updateSpeciesPreview)
 
@@ -202,11 +233,15 @@ createBtn.addEventListener('click', async () => {
 proceedBtn.addEventListener('click', () => {
   const nickname = requireNickname()
   if (!nickname || !pendingRoomCode) return
-  const displayId = selectedDisplayId()
-  window.launcherAPI.saveNickname(nickname)
-  window.launcherAPI.saveSpecies(speciesSelect.value)
-  if (displayId !== undefined) window.launcherAPI.saveDisplayId(displayId)
-  window.launcherAPI.start({ mode: 'multiplayer', roomCode: pendingRoomCode, nickname, species: speciesSelect.value, displayId })
+  saveCommonSettings(nickname)
+  window.launcherAPI.start({
+    mode: 'multiplayer',
+    roomCode: pendingRoomCode,
+    nickname,
+    species: speciesSelect.value,
+    displayId: selectedDisplayId(),
+    viewScale: selectedViewScale(),
+  })
 })
 
 joinBtn.addEventListener('click', async () => {
@@ -225,11 +260,15 @@ joinBtn.addEventListener('click', async () => {
     const res = await requestOnce({ type: 'join-room', roomCode, nickname, species: speciesSelect.value })
     if (res.type === 'joined') {
       setStatus('참여 완료! 시작합니다...', 'success')
-      const displayId = selectedDisplayId()
-      window.launcherAPI.saveNickname(nickname)
-      window.launcherAPI.saveSpecies(speciesSelect.value)
-      if (displayId !== undefined) window.launcherAPI.saveDisplayId(displayId)
-      window.launcherAPI.start({ mode: 'multiplayer', roomCode, nickname, species: speciesSelect.value, displayId })
+      saveCommonSettings(nickname)
+      window.launcherAPI.start({
+        mode: 'multiplayer',
+        roomCode,
+        nickname,
+        species: speciesSelect.value,
+        displayId: selectedDisplayId(),
+        viewScale: selectedViewScale(),
+      })
     } else {
       setStatus(ERROR_MESSAGES[res.code] || `참여에 실패했어요 (${res.code || res.type})`, 'error')
       setBusy(false)
@@ -247,11 +286,14 @@ joinBtn.addEventListener('click', async () => {
 
 offlineBtn.addEventListener('click', () => {
   const nickname = nicknameInput.value.trim() || '나'
-  const displayId = selectedDisplayId()
-  window.launcherAPI.saveNickname(nickname)
-  window.launcherAPI.saveSpecies(speciesSelect.value)
-  if (displayId !== undefined) window.launcherAPI.saveDisplayId(displayId)
-  window.launcherAPI.start({ mode: 'offline', nickname, species: speciesSelect.value, displayId })
+  saveCommonSettings(nickname)
+  window.launcherAPI.start({
+    mode: 'offline',
+    nickname,
+    species: speciesSelect.value,
+    displayId: selectedDisplayId(),
+    viewScale: selectedViewScale(),
+  })
 })
 
 init()
