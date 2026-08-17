@@ -8,6 +8,7 @@
     "start": "electron .",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
+    "dist:win:portable": "electron-builder --win portable",
     "dist": "electron-builder --mac --win"
   },
   "devDependencies": {
@@ -40,12 +41,15 @@
     },
     "win": {
       "icon": "build/icon.ico",
-      "target": ["nsis", "zip"],
-      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+      "target": ["nsis", "portable", "zip"]
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-Setup-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}-${arch}.${ext}"
     }
   }
 }
