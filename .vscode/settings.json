@@ -1,0 +1,12 @@
+{
+  // VS Code는 자식 프로세스에 ELECTRON_RUN_AS_NODE=1을 물려준다. 이게 남아 있으면
+  // 통합 터미널에서 `npm start`를 했을 때 Electron이 그냥 Node로 실행돼서
+  // `require('electron')`이 모듈 대신 경로 문자열을 돌려주고 main.js가 즉시 죽는다.
+  // (증상: "TypeError: Cannot read properties of undefined (reading 'getPath')")
+  "terminal.integrated.env.windows": {
+    "ELECTRON_RUN_AS_NODE": null
+  },
+  "terminal.integrated.env.osx": {
+    "ELECTRON_RUN_AS_NODE": null
+  }
+}
