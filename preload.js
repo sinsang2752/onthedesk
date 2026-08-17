@@ -31,4 +31,8 @@ contextBridge.exposeInMainWorld('petAPI', {
   onChatMessageSent: (callback) => {
     ipcRenderer.on('chat-message-sent', (_event, text) => callback(text))
   },
+  // 트레이 메뉴에서 "상단 UI 숨기기/보이기"를 눌렀을 때 알려줌
+  onHudVisibilityChanged: (callback) => {
+    ipcRenderer.on('hud-visibility', (_event, visible) => callback(visible))
+  },
 })

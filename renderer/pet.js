@@ -65,6 +65,22 @@ chatToggleEl.addEventListener('click', () => {
   chatPanelEl.classList.toggle('open')
 })
 
+// ---- 상단 UI 표시/숨김 (트레이 메뉴) ----
+// 숨겨도 캐릭터·닉네임·말풍선은 그대로 보이고, 채팅 송수신도 평소처럼 동작한다
+// (조작 모드에서 Enter로 여는 입력창은 별도 창이라 여기 영향을 받지 않음).
+function applyHudVisibility(visible) {
+  document.body.classList.toggle('hud-hidden', !visible)
+  if (visible) return
+
+  // 열려 있던 로그 패널은 같이 닫는다 — 다시 열 버튼이 사라지기 때문.
+  chatPanelEl.classList.remove('open')
+  // 숨기는 순간 커서가 채팅 버튼/패널 위에 있었다면 mouseleave가 오지 않아
+  // 오버레이가 계속 마우스를 가로채는 상태로 남는다. 직접 클릭 통과로 되돌린다.
+  window.petAPI.setIgnoreMouseEvents(true, { forward: true })
+}
+
+window.petAPI.onHudVisibilityChanged(applyHudVisibility)
+
 function appendChatLog({ nickname, color, text }) {
   const row = document.createElement('div')
   row.className = 'chat-log-row'
@@ -379,6 +395,7 @@ function startMultiplayer({ signalingServerUrl, roomCode, nickname, species }) {
 }
 
 window.petAPI.onInitParams((params) => {
+  applyHudVisibility(params.hudVisible !== false)
   if (params.mode === 'offline') {
     startOffline(params)
   } else {

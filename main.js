@@ -8,6 +8,10 @@ let inputWindow = null
 let chatWindow = null
 let tray = null
 let isVisible = true
+// 화면 상단 UI(좌상단 모드 표시 + 우상단 채팅 버튼/로그 패널)를 보여줄지 여부.
+// 캐릭터·닉네임·말풍선과 채팅 기능 자체는 이 값과 무관하게 항상 동작한다.
+// 실제 초기값은 저장된 설정에서 읽어온다(app.whenReady 참고).
+let hudVisible = true
 let mode = 'spectate' // 'spectate' | 'control' — 3.6 조작 모드
 let chatOpen = false // 조작 모드 중 채팅 입력창이 떠 있는지
 let sessionStarted = false // 런처를 지나 실제 캐릭터 세션이 시작됐는지
@@ -104,7 +108,11 @@ function startSession(params) {
   createInputWindow()
   createChatWindow(targetDisplay)
 
-  const initParams = { ...params, signalingServerUrl: loadClientConfig().signalingServerUrl }
+  const initParams = {
+    ...params,
+    signalingServerUrl: loadClientConfig().signalingServerUrl,
+    hudVisible, // 오버레이가 처음 그려질 때부터 저장된 설정이 반영되도록 같이 넘김
+  }
   overlayWindow.webContents.once('did-finish-load', () => {
     overlayWindow.webContents.send('init-params', initParams)
   })
@@ -297,6 +305,17 @@ function updateTrayMenu() {
         updateTrayMenu()
       },
     },
+    {
+      // 캐릭터/닉네임/말풍선과 채팅은 그대로 두고, 화면 상단의 모드 표시와
+      // 채팅 버튼(+그 버튼으로 여는 로그 패널)만 감춘다.
+      label: hudVisible ? '상단 UI 숨기기' : '상단 UI 보이기',
+      click: () => {
+        hudVisible = !hudVisible
+        saveLocalState({ hudVisible })
+        overlayWindow?.webContents.send('hud-visibility', hudVisible)
+        updateTrayMenu()
+      },
+    },
     { type: 'separator' },
     {
       label: '종료',
@@ -405,6 +424,7 @@ function registerAppActivationGuard() {
 }
 
 app.whenReady().then(() => {
+  hudVisible = loadLocalState().hudVisible !== false // 저장된 적 없으면 기본은 표시
   createTray()
   registerGlobalShortcuts()
   registerAppActivationGuard()

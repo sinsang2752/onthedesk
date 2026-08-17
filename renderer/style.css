@@ -142,6 +142,15 @@ html, body {
   display: flex;
 }
 
+/* 트레이 메뉴의 "상단 UI 숨기기" — 화면 상단 요소(모드 표시, 채팅 버튼, 채팅 로그 패널)만
+   감춘다. 캐릭터/닉네임/말풍선은 이 규칙에 걸리지 않으므로 그대로 보인다.
+   .chat-panel.open(0,2,0)보다 선택자 우선순위가 높아야 열린 패널도 확실히 숨겨진다. */
+body.hud-hidden .mode-indicator,
+body.hud-hidden .chat-toggle,
+body.hud-hidden .chat-panel {
+  display: none;
+}
+
 .chat-log {
   flex: 1;
   overflow-y: auto;
