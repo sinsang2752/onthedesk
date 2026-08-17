@@ -60,6 +60,11 @@ async function initDisplays() {
     displaySelect.appendChild(opt)
   })
 
+  // 기본값은 주 모니터. 그냥 두면 목록 첫 번째(주 모니터가 아닐 수 있음)가 잡힌다.
+  const primary = displays.find((d) => d.isPrimary)
+  if (primary) displaySelect.value = String(primary.id)
+
+  // 이전에 고른 모니터가 있으면 그쪽을 우선한다(지금 연결돼 있는 경우에만).
   try {
     const savedId = await window.launcherAPI.getSavedDisplayId()
     if (savedId != null && displays.some((d) => d.id === savedId)) {
