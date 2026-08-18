@@ -15,6 +15,7 @@ const template = document.getElementById('character-template')
 export const SPECIES_LIST = ['cat', 'dog', 'frog', 'turtle']
 const DEFAULT_SPECIES = 'cat'
 const WALK_FRAME_INTERVAL_MS = 220
+const BUBBLE_EDGE_MARGIN = 8 // 말풍선이 화면 끝에 딱 붙지 않도록 항상 이만큼은 비워둠
 
 function normalizeSpecies(species) {
   return SPECIES_LIST.includes(species) ? species : DEFAULT_SPECIES
@@ -116,7 +117,34 @@ export function createCharacter({ nickname = '', color = '#333', isLocal = false
     },
     showBubble(text, durationMs = 2500) {
       bubbleEl.textContent = text
+      // 이전 메시지 때 계산해둔 보정이 새 측정에 섞이지 않도록 먼저 초기화.
+      bubbleEl.classList.remove('below')
+      bubbleEl.style.removeProperty('--bubble-shift-x')
       bubbleEl.classList.add('visible')
+
+      // 화면 구석(특히 화면 좌우/위쪽 끝)에 붙은 캐릭터의 말풍선이 화면 밖으로 잘려서
+      // 보이던 문제 수정. el(.pet)의 transform은 transition이 없는 고정값이라
+      // getBoundingClientRect()가 항상 지금 실제로 그려진 위치를 정확히 돌려준다.
+      // 말풍선 쪽은 transform에 transition이 걸려 있어 대신 그 영향을 안 받는
+      // offsetWidth/offsetHeight(레이아웃 크기)로 크기를 잰다.
+      const petRect = el.getBoundingClientRect()
+      const anchorX = petRect.left + petRect.width / 2
+      const halfBubbleWidth = bubbleEl.offsetWidth / 2
+
+      let shiftX = 0
+      if (anchorX - halfBubbleWidth < BUBBLE_EDGE_MARGIN) {
+        shiftX = BUBBLE_EDGE_MARGIN - (anchorX - halfBubbleWidth)
+      } else if (anchorX + halfBubbleWidth > window.innerWidth - BUBBLE_EDGE_MARGIN) {
+        shiftX = window.innerWidth - BUBBLE_EDGE_MARGIN - (anchorX + halfBubbleWidth)
+      }
+      if (shiftX !== 0) bubbleEl.style.setProperty('--bubble-shift-x', `${Math.round(shiftX)}px`)
+
+      // 캐릭터 머리 위(=petRect.top)에 남은 공간이 말풍선 높이보다 부족하면 아래로 뒤집는다.
+      const bubbleFootprint = bubbleEl.offsetHeight + 18 // translateY 여백 + 화살표만큼 여유
+      if (petRect.top < bubbleFootprint + BUBBLE_EDGE_MARGIN) {
+        bubbleEl.classList.add('below')
+      }
+
       if (bubbleTimer) clearTimeout(bubbleTimer)
       bubbleTimer = setTimeout(() => {
         bubbleEl.classList.remove('visible')

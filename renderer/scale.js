@@ -43,3 +43,9 @@ root.style.setProperty('--pet-bubble-font-size', `${Math.round(14 * SCALE_FACTOR
 root.style.setProperty('--pet-bubble-padding-v', `${Math.round(8 * SCALE_FACTOR)}px`)
 root.style.setProperty('--pet-bubble-padding-h', `${Math.round(12 * SCALE_FACTOR)}px`)
 root.style.setProperty('--pet-bubble-radius', `${Math.round(12 * SCALE_FACTOR)}px`)
+// 말풍선이 화면 밖으로 잘리는 걸 막기 위한 상한선(character.js의 화면 끝 보정 로직과 함께
+// 쓰인다). 화면이 아주 좁을 때도 안전하도록 뷰포트 폭에서 여백을 뺀 값과 min()으로 잡는다.
+root.style.setProperty(
+  '--pet-bubble-max-width',
+  `${Math.min(Math.round(400 * SCALE_FACTOR), window.innerWidth - 32)}px`
+)
