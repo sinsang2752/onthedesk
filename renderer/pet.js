@@ -135,8 +135,23 @@ let lastSentDirKey = null
 const remotePeers = new Map()
 
 function createRemoteMotion() {
-  // 상대가 보낸 마지막 이벤트로부터 "죽은 셈 치고(dead-reckoning)" 현재 위치를 매 프레임 계산.
-  // startTime은 반드시 Date.now() 기준(양쪽 프로세스의 performance.now()는 서로 비교 불가능!).
+  // 상대가 보낸 마지막 이벤트로부터 "죽은 셈 치고(dead-reckoning)" 현재 위치(=authoritative
+  // position)를 매 프레임 계산한다.
+  // startTime은 항상 이 메시지를 받은 시각(내 PC의 Date.now())으로 채운다(onPeerMessage 참고) —
+  // 상대가 보낸 시각을 쓰면 두 PC 시계가 안 맞을 때(흔함) 경과 시간이 틀어져서 캐릭터가
+  // 얼어붙었다 튀는 것처럼 보이는 문제가 있었다. Date.now()를 쓰는 이유는 이 값을 같은
+  // 프로세스 안에서 나중에 다시 Date.now()와 비교하기 때문(performance.now()는 프로세스
+  // 시작 시점 기준이라 애초에 이런 식으로 재사용 불가).
+  //
+  // 시각적 보정(스무딩): 방향이 바뀌어 새 move-start가 올 때마다 authoritative position의
+  // 기준점(startX/startY)이 그 순간 상대가 보고한 값으로 바뀐다. 네트워크 전송 지연 때문에
+  // 그 값은 지금까지 화면에 그려주던 위치와 항상 살짝 차이가 나는데, 이걸 그 즉시 스냅해버리면
+  // 방향을 자주 바꿀 때마다(화살표 탭탭) 캐릭터 좌표가 툭툭 튀어 보인다(애니메이션은 별도
+  // 타이머라 이 영향을 안 받아 멀쩡해 보이는 것과 대조적으로). 그래서 기준점이 바뀔 때마다
+  // 즉시 스냅하지 않고, 마지막으로 그려준 위치에서 새 authoritative position까지
+  // CORRECTION_DURATION_MS 동안 선형 보간(lerp)해서 부드럽게 따라붙게 한다.
+  const CORRECTION_DURATION_MS = 120
+
   let moving = false
   let dirX = 0
   let dirY = 0
@@ -146,8 +161,34 @@ function createRemoteMotion() {
   let stoppedX = 0
   let stoppedY = 0
 
+  let lastRenderedX = null // 아직 한 번도 안 그렸으면 null — 이땐 보정할 이전 위치가 없음
+  let lastRenderedY = null
+  let correctionStartTime = 0
+  let correctionFromX = 0
+  let correctionFromY = 0
+
+  // 새 이벤트로 authoritative 기준점이 바뀌기 직전에, 지금까지 그려주던 위치를
+  // 보정 시작점으로 기록해둔다. 첫 이벤트(캐릭터가 막 생겨서 아직 그린 적 없을 때)는
+  // 보정 없이 바로 정확한 위치에 나타나야 하므로 건너뛴다.
+  function beginCorrection() {
+    if (lastRenderedX === null) return
+    correctionFromX = lastRenderedX
+    correctionFromY = lastRenderedY
+    correctionStartTime = Date.now()
+  }
+
+  function authoritativePosition() {
+    if (!moving) return { x: stoppedX, y: stoppedY }
+    const elapsedSec = Math.max(0, (Date.now() - startTime) / 1000)
+    return {
+      x: clamp(startX + dirX * MOVE_SPEED * elapsedSec, HALF_WIDTH, window.innerWidth - HALF_WIDTH),
+      y: clamp(startY + dirY * MOVE_SPEED * elapsedSec, TOP_MARGIN, window.innerHeight - BOTTOM_MARGIN),
+    }
+  }
+
   return {
     applyMoveStart({ x: px, y: py, dirX: dx, dirY: dy, startTime: t }) {
+      beginCorrection()
       moving = true
       dirX = dx
       dirY = dy
@@ -156,6 +197,7 @@ function createRemoteMotion() {
       startTime = t
     },
     applyMoveStop({ x: px, y: py }) {
+      beginCorrection()
       moving = false
       stoppedX = px
       stoppedY = py
@@ -168,12 +210,21 @@ function createRemoteMotion() {
       return directionFromVector(dirX, dirY)
     },
     computePosition() {
-      if (!moving) return { x: stoppedX, y: stoppedY }
-      const elapsedSec = Math.max(0, (Date.now() - startTime) / 1000)
-      return {
-        x: clamp(startX + dirX * MOVE_SPEED * elapsedSec, HALF_WIDTH, window.innerWidth - HALF_WIDTH),
-        y: clamp(startY + dirY * MOVE_SPEED * elapsedSec, TOP_MARGIN, window.innerHeight - BOTTOM_MARGIN),
+      const target = authoritativePosition()
+      const sinceCorrection = Date.now() - correctionStartTime
+
+      let result = target
+      if (sinceCorrection < CORRECTION_DURATION_MS) {
+        const t = sinceCorrection / CORRECTION_DURATION_MS
+        result = {
+          x: correctionFromX + (target.x - correctionFromX) * t,
+          y: correctionFromY + (target.y - correctionFromY) * t,
+        }
       }
+
+      lastRenderedX = result.x
+      lastRenderedY = result.y
+      return result
     },
   }
 }
@@ -208,7 +259,7 @@ function maybeEmitMovementEvent(dir) {
   if (!dir) {
     if (lastSentMoving) {
       const { nx, ny } = toNormalized(x, y)
-      network.broadcast({ type: 'move-stop', nx, ny })
+      network.broadcastState({ type: 'move-stop', nx, ny })
       lastSentMoving = false
       lastSentDirKey = null
     }
@@ -218,7 +269,7 @@ function maybeEmitMovementEvent(dir) {
   const dirKey = `${dir.dx.toFixed(3)},${dir.dy.toFixed(3)}`
   if (dirKey !== lastSentDirKey) {
     const { nx, ny } = toNormalized(x, y)
-    network.broadcast({ type: 'move-start', nx, ny, dirX: dir.dx, dirY: dir.dy, startTime: Date.now() })
+    network.broadcastState({ type: 'move-start', nx, ny, dirX: dir.dx, dirY: dir.dy, startTime: Date.now() })
     lastSentDirKey = dirKey
     lastSentMoving = true
   }
@@ -299,7 +350,7 @@ window.petAPI.onChatMessageSent((text) => {
   if (!trimmed) return
   localChar.showBubble(trimmed, BUBBLE_DURATION_MS)
   appendChatLog({ nickname: localNickname, color: colorForText(localNickname), text: trimmed })
-  network?.broadcast({ type: 'chat', text: trimmed })
+  network?.broadcastChat({ type: 'chat', text: trimmed })
 })
 
 // ---- 시작: 런처가 넘겨준 초기 파라미터에 따라 오프라인/멀티플레이 분기 ----
@@ -364,7 +415,13 @@ function startMultiplayer({ signalingServerUrl, roomCode, nickname, species }) {
         if (!entry) return
         if (msg.type === 'move-start') {
           const pos = fromNormalized(msg.nx, msg.ny)
-          entry.motion.applyMoveStart({ x: pos.x, y: pos.y, dirX: msg.dirX, dirY: msg.dirY, startTime: msg.startTime })
+          // 경과 시간 기준점은 상대가 보낸 startTime(상대 PC 시계)이 아니라 지금
+          // 이 메시지를 받은 시각(내 PC 시계)으로 잡는다 — 두 PC 시계가 안 맞으면
+          // (흔한 일) 경과 시간이 음수로 나와 0으로 고정되고, 그러다 내 시계가 상대
+          // 시계를 따라잡는 순간 캐릭터가 갑자기 움직이는 것처럼 보이는 문제가 있었다.
+          // 전송 지연만큼 살짝 늦게 출발하게 되지만(보통 수십~수백ms), 이게 시계가 안
+          // 맞아서 얼어붙었다 튀는 것보다 훨씬 자연스럽다(REQUIREMENTS.md 3.2 참고).
+          entry.motion.applyMoveStart({ x: pos.x, y: pos.y, dirX: msg.dirX, dirY: msg.dirY, startTime: Date.now() })
         } else if (msg.type === 'move-stop') {
           const pos = fromNormalized(msg.nx, msg.ny)
           entry.motion.applyMoveStop({ x: pos.x, y: pos.y })
@@ -391,7 +448,7 @@ function startMultiplayer({ signalingServerUrl, roomCode, nickname, species }) {
   // 개발/테스트용 훅: devtools 콘솔에서 임의 payload를 내 실제 DataChannel로 보내볼 수 있게 함.
   // (내 연결 자체를 통해서만 나가므로, 어떤 payload를 넣어도 수신측에서는 여전히 "나"로만
   //  식별됨 — 3.7 소유권 검증이 프로토콜 구조상 우회 불가능함을 확인하는 용도)
-  window.__debugSendRaw = (msg) => network?.broadcast(msg)
+  window.__debugSendRaw = (msg) => network?.broadcastState(msg)
 }
 
 // 트레이의 "방 나가기" — P2P/시그널링 연결을 끊고 원격 캐릭터를 화면에서 지운다.
